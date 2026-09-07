@@ -4,6 +4,7 @@ from aiogram import F,Router
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Command
 from aiogram.types import ChatPermissions,Message
+from core.rate_limit import RateLimiter
 from database.db import Database
 router=Router(name="groups")
 async def admin(message:Message)->bool:
@@ -54,6 +55,28 @@ async def tag(message:Message,db:Database)->None:
   chunk=" ".join(f'<a href="tg://user?id={r["user_id"]}">{r["full_name"][:20]}</a>' for r in rows[i:i+5]); await message.answer(f"{text}\n{chunk}"); await asyncio.sleep(1.2)
 @router.message(Command("tagstop"))
 async def tagstop(message:Message,db:Database)->None: await db.set_setting(message.from_user.id,f"tag:{message.chat.id}","off"); await message.answer("Tag متوقف شد.")
+
+@router.message(Command("antilink", "antispam", "welcome", "goodbye"))
+async def toggle_group_feature(message: Message, db: Database) -> None:
+ if not await admin(message): await message.answer("فقط مدیر گروه مجاز است."); return
+ parts=(message.text or "").split(maxsplit=2); command=parts[0].split("@")[0][1:]
+ if len(parts)<2: await message.answer(f"/{command} on|off" if command in {"antilink","antispam"} else f"/{command} TEXT|off"); return
+ value=parts[1] if command in {"antilink","antispam"} else (message.text or "").split(maxsplit=1)[1]
+ if command in {"antilink","antispam"} and value not in {"on","off"}: await message.answer("مقدار باید on یا off باشد."); return
+ await db.execute("INSERT INTO chat_settings(chat_id,key,value) VALUES(?,?,?) ON CONFLICT(chat_id,key) DO UPDATE SET value=excluded.value",(message.chat.id,command,value[:1000])); await message.answer("تنظیم ذخیره شد.")
+
+@router.message(F.new_chat_members)
+async def welcome_members(message: Message, db: Database) -> None:
+ row=await db.fetchone("SELECT value FROM chat_settings WHERE chat_id=? AND key='welcome'",(message.chat.id,))
+ if not row or row["value"]=="off": raise SkipHandler
+ for member in message.new_chat_members: await message.answer(row["value"].replace("{name}",member.full_name).replace("{id}",str(member.id)))
+
+@router.message(F.left_chat_member)
+async def goodbye_member(message: Message, db: Database) -> None:
+ row=await db.fetchone("SELECT value FROM chat_settings WHERE chat_id=? AND key='goodbye'",(message.chat.id,))
+ if not row or row["value"]=="off": raise SkipHandler
+ member=message.left_chat_member; await message.answer(row["value"].replace("{name}",member.full_name).replace("{id}",str(member.id)))
+
 @router.message(F.text.regexp(r"(?:https?://|t\.me/)",flags=re.I))
 async def anti_link(message:Message,db:Database)->None:
  enabled=await db.fetchone("SELECT value FROM chat_settings WHERE chat_id=? AND key='antilink'",(message.chat.id,))
@@ -61,3 +84,11 @@ async def anti_link(message:Message,db:Database)->None:
  if await admin(message): raise SkipHandler
  try: await message.delete()
  except Exception: pass
+
+@router.message(F.text & ~F.text.startswith("/"))
+async def anti_spam(message: Message, db: Database, rate_limiter: RateLimiter) -> None:
+ enabled=await db.fetchone("SELECT value FROM chat_settings WHERE chat_id=? AND key='antispam'",(message.chat.id,))
+ if not enabled or enabled["value"]!="on": raise SkipHandler
+ if await rate_limiter.allow(f"spam:{message.chat.id}:{message.from_user.id}"): raise SkipHandler
+ try: await message.delete()
+ except Exception: await db.increment_stat("errors")

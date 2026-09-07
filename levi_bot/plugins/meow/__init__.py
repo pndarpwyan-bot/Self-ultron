@@ -1,1 +1,1 @@
-"""Meow game plugin.""
+"""Meow game plugin."""

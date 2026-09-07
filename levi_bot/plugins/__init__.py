@@ -1,0 +1,1 @@
+"""Fault-isolated application plugins."""

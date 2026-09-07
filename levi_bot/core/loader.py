@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 from dataclasses import dataclass, field
 
 from aiogram import Dispatcher
@@ -26,7 +27,12 @@ class PluginReport:
 
 def load_plugins(dispatcher: Dispatcher) -> PluginReport:
     report = PluginReport()
+    disabled = {name.strip().lower() for name in os.getenv("DISABLED_PLUGINS", "").split(",") if name.strip()}
     for module_name in PLUGIN_MODULES:
+        short_name = module_name.split(".")[1]
+        if short_name in disabled:
+            logger.info("Plugin disabled by configuration: %s", short_name)
+            continue
         try:
             module = importlib.import_module(module_name)
             router = getattr(module, "router")

@@ -1,4 +1,5 @@
-from aiogram import Router
+from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Command
 from aiogram.types import Message, ReactionTypeEmoji
 from database.db import Database
@@ -18,3 +19,13 @@ async def reaction(message: Message, db: Database) -> None:
         try: await message.react([ReactionTypeEmoji(emoji=emoji)])
         except Exception: await message.answer("تنظیم ذخیره شد؛ این Emoji/Chat ممکن است Reaction ربات را نپذیرد."); return
     await message.answer("تنظیم ری‌اکشن ذخیره شد.")
+
+@router.message(F.text & ~F.text.startswith("/"))
+async def auto_reaction(message: Message, db: Database) -> None:
+    row = await db.fetchone("SELECT emoji FROM reactions WHERE chat_id=? AND enabled=1", (message.chat.id,))
+    if not row:
+        raise SkipHandler
+    try:
+        await message.react([ReactionTypeEmoji(emoji=row["emoji"])])
+    finally:
+        raise SkipHandler

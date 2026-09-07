@@ -1,7 +1,8 @@
 from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Command
-from aiogram.types import Message
+from datetime import datetime, timedelta, timezone
+from aiogram.types import ChatPermissions, Message
 from database.db import Database
 
 router = Router(name="filter")
@@ -17,7 +18,7 @@ async def manage(message: Message, db: Database) -> None:
         await message.answer("فقط مدیر گفتگو مجاز است."); return
     parts = (message.text or "").split()
     if len(parts) < 2:
-        await message.answer("/filter add WORD [delete|warn|mute]\n/filter list\n/filter del ID"); return
+        await message.answer("/filter add WORD [delete|warn|mute]\n/filter list\n/filter del ID\n/filter toggle ID"); return
     if parts[1] == "add" and len(parts) >= 3:
         action = parts[3] if len(parts) > 3 and parts[3] in {"delete", "warn", "mute"} else "delete"
         await db.execute("INSERT OR REPLACE INTO filters(owner_id,chat_id,word,action) VALUES(?,?,?,?)",
@@ -26,8 +27,12 @@ async def manage(message: Message, db: Database) -> None:
     elif parts[1] == "list":
         rows = await db.fetchall("SELECT * FROM filters WHERE chat_id=?", (message.chat.id,))
         await message.answer("\n".join(f"#{r['id']} {r['word']} ({r['action']})" for r in rows) or "خالی است.")
-    elif parts[1] == "del" and len(parts) > 2 and parts[2].isdigit():
-        await db.execute("DELETE FROM filters WHERE id=? AND chat_id=?", (int(parts[2]), message.chat.id)); await message.answer("حذف شد.")
+    elif parts[1] in {"del", "toggle"} and len(parts) > 2 and parts[2].isdigit():
+        if parts[1] == "del":
+            await db.execute("DELETE FROM filters WHERE id=? AND chat_id=?", (int(parts[2]), message.chat.id))
+        else:
+            await db.execute("UPDATE filters SET enabled=1-enabled WHERE id=? AND chat_id=?", (int(parts[2]), message.chat.id))
+        await message.answer("انجام شد.")
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def enforce(message: Message, db: Database) -> None:
@@ -39,3 +44,12 @@ async def enforce(message: Message, db: Database) -> None:
     if match["action"] == "warn":
         await db.execute("""INSERT INTO warnings(chat_id,user_id,count) VALUES(?,?,1)
             ON CONFLICT(chat_id,user_id) DO UPDATE SET count=count+1""", (message.chat.id, message.from_user.id))
+    elif match["action"] == "mute" and message.chat.type != "private":
+        try:
+            await message.chat.restrict(
+                message.from_user.id,
+                ChatPermissions(can_send_messages=False),
+                until_date=datetime.now(timezone.utc) + timedelta(minutes=10),
+            )
+        except Exception:
+            await db.increment_stat("errors")

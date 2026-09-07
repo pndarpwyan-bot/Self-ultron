@@ -2,6 +2,8 @@ import ast,operator
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+from config import Settings
+from services.currency import CurrencyService
 router=Router(name="tools")
 OPS={ast.Add:operator.add,ast.Sub:operator.sub,ast.Mult:operator.mul,ast.Div:operator.truediv,ast.Pow:operator.pow,ast.Mod:operator.mod,ast.USub:operator.neg,ast.UAdd:operator.pos}
 def calculate(expr:str)->float:
@@ -28,3 +30,15 @@ async def percent(message:Message)->None:
  try:
   _,p,n=(message.text or "").split(); await message.answer(f"{float(p)*float(n)/100:g}")
  except (ValueError,IndexError): await message.answer("/percent 20 150")
+
+@router.message(Command("currency"))
+async def currency(message: Message, settings: Settings) -> None:
+ parts = (message.text or "").split()
+ if len(parts) < 3:
+  await message.answer("/currency USD EUR [AMOUNT]"); return
+ try:
+  amount = float(parts[3]) if len(parts) > 3 else 1.0
+  result = await CurrencyService(settings.currency_api_url).convert(parts[1], parts[2], amount)
+  await message.answer(f"{amount:g} {parts[1].upper()} = {result:,.4f} {parts[2].upper()}")
+ except Exception as exc:
+  await message.answer(f"دریافت نرخ ناموفق بود: {exc}")

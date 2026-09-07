@@ -15,11 +15,20 @@ async def manage(message: Message, db: Database) -> None:
     action = raw[1]
     if action == "add" and len(raw) == 3 and "|" in raw[2]:
         trigger, response = (part.strip() for part in raw[2].split("|", 1))
-        if not trigger or not response or len(trigger) > 100 or len(response) > 4000:
+        source = message.reply_to_message
+        response_type, file_id = "text", None
+        if source and source.photo:
+            response_type, file_id = "photo", source.photo[-1].file_id
+        elif source and source.video:
+            response_type, file_id = "video", source.video.file_id
+        elif source and source.document:
+            response_type, file_id = "document", source.document.file_id
+        if not trigger or (not response and not file_id) or len(trigger) > 100 or len(response) > 4000:
             await message.answer("طول ورودی نامعتبر است."); return
         scope = "private" if message.chat.type == "private" else "group"
-        await db.execute("INSERT OR REPLACE INTO autoreplies(owner_id,chat_id,scope,trigger,response) VALUES(?,?,?,?,?)",
-                         (message.from_user.id, message.chat.id, scope, trigger.casefold(), response))
+        await db.execute("""INSERT OR REPLACE INTO autoreplies
+            (owner_id,chat_id,scope,trigger,response_type,response,file_id) VALUES(?,?,?,?,?,?,?)""",
+            (message.from_user.id, message.chat.id, scope, trigger.casefold(), response_type, response, file_id))
         await message.answer("پاسخ خودکار ذخیره شد.")
     elif action == "list":
         rows = await db.fetchall("SELECT id,trigger,response,enabled FROM autoreplies WHERE owner_id=? ORDER BY id DESC LIMIT 50", (message.from_user.id,))
@@ -41,4 +50,11 @@ async def reply(message: Message, db: Database) -> None:
         ((message.text or "").casefold().strip(), scope, message.chat.id))
     if not row:
         raise SkipHandler
-    await message.reply(row["response"])
+    if row["response_type"] == "photo":
+        await message.reply_photo(row["file_id"], caption=row["response"])
+    elif row["response_type"] == "video":
+        await message.reply_video(row["file_id"], caption=row["response"])
+    elif row["response_type"] == "document":
+        await message.reply_document(row["file_id"], caption=row["response"])
+    else:
+        await message.reply(row["response"])

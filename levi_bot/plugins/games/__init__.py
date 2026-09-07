@@ -1,1 +1,1 @@
-"""General game engine plugin.""
+"""General game engine plugin."""

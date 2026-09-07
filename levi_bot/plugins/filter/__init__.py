@@ -1,0 +1,1 @@
+"""Word filter plugin."""

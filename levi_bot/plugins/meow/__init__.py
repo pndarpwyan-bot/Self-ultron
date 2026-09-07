@@ -1,0 +1,1 @@
+"""Meow game plugin.""
